@@ -7,9 +7,9 @@ const timeout = 5000;
 
 (async () => {
     const browser = await puppeteer.launch( {
-        headless: "false",
-        executablePath: '/Applications/Google\ Chrome\ Canary.app/Contents/MacOS/Google\ Chrome\ Canary',
-        userDataDir: '/Users/jasonzhou/Library/Application\ Support/Google/Chrome\ Canary/Default',
+        headless: false,
+        // executablePath: '/Applications/Google\ Chrome\ Canary.app/Contents/MacOS/Google\ Chrome\ Canary',
+        // userDataDir: '/Users/jasonzhou/Library/Application\ Support/Google/Chrome\ Canary/Default',
     } );
 
     const page = await browser.newPage();

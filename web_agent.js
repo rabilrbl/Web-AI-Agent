@@ -1,14 +1,45 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const OpenAI = require('openai');
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const readline = require('readline');
 const fs = require('fs');
 require('dotenv/config');
 
 puppeteer.use(StealthPlugin());
 
-const openai = new OpenAI();
+const genAI = new GoogleGenerativeAI(process.env.API_KEY);
+const text_model = genAI.getGenerativeModel({ model: "gemini-pro" });
+const image_model = genAI.getGenerativeModel({ model: "gemini-pro-vision" });
 const timeout = 5000;
+let text_chat = null;
+let image_chat = null;
+
+async function generate_genai_response(data) {
+    if (text_chat === null) {
+        text_chat = text_model.startChat();
+    }
+    if (image_chat === null) {
+        image_chat = image_model.startChat({history: await text_chat.getHistory()});
+    }
+    result_responses = "";
+    for (const message of data) {
+        // check if javascript type of message.content is string
+        if (typeof message.content === "string") {
+            const model_response = (await text_chat.sendMessage(message.content)).response;
+            result_responses += model_response.text();
+        } else if (message.content[0].type === "image_url") {
+            const imageParts = [{
+                inlineData: {
+                    data: message.content[0].image_url,
+                    mimeType: "image/jpeg",
+                },
+            }];
+            const model_response = (await image_chat.sendMessage([message.content[1].text, imageParts])).response;
+            result_responses += model_response.text();
+        }
+    }
+    return result_responses;
+}
 
 async function image_to_base64(image_file) {
     return await new Promise((resolve, reject) => {
@@ -20,42 +51,42 @@ async function image_to_base64(image_file) {
             }
 
             const base64Data = data.toString('base64');
-            const dataURI = `data:image/jpeg;base64,${base64Data}`;
-            resolve(dataURI);
+            // const dataURI = `data:image/jpeg;base64,${base64Data}`;
+            resolve(base64Data);
         });
     });
 }
 
-async function input( text ) {
+async function input(text) {
     let the_prompt;
 
     const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
+        input: process.stdin,
+        output: process.stdout
     });
 
     await (async () => {
-        return new Promise( resolve => {
-            rl.question( text, (prompt) => {
+        return new Promise(resolve => {
+            rl.question(text, (prompt) => {
                 the_prompt = prompt;
                 rl.close();
                 resolve();
-            } );
-        } );
+            });
+        });
     })();
 
     return the_prompt;
 }
 
-async function sleep( milliseconds ) {
+async function sleep(milliseconds) {
     return await new Promise((r, _) => {
-        setTimeout( () => {
+        setTimeout(() => {
             r();
-        }, milliseconds );
+        }, milliseconds);
     });
 }
 
-async function highlight_links( page ) {
+async function highlight_links(page) {
     await page.evaluate(() => {
         document.querySelectorAll('[gpt-link-text]').forEach(e => {
             e.removeAttribute("gpt-link-text");
@@ -66,7 +97,7 @@ async function highlight_links( page ) {
         "a, button, input, textarea, [role=button], [role=treeitem]"
     );
 
-    elements.forEach( async e => {
+    elements.forEach(async e => {
         await page.evaluate(e => {
             function isElementVisible(el) {
                 if (!el) return false; // Element does not exist
@@ -74,19 +105,19 @@ async function highlight_links( page ) {
                 function isStyleVisible(el) {
                     const style = window.getComputedStyle(el);
                     return style.width !== '0' &&
-                           style.height !== '0' &&
-                           style.opacity !== '0' &&
-                           style.display !== 'none' &&
-                           style.visibility !== 'hidden';
+                        style.height !== '0' &&
+                        style.opacity !== '0' &&
+                        style.display !== 'none' &&
+                        style.visibility !== 'hidden';
                 }
 
                 function isElementInViewport(el) {
                     const rect = el.getBoundingClientRect();
                     return (
-                    rect.top >= 0 &&
-                    rect.left >= 0 &&
-                    rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
-                    rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+                        rect.top >= 0 &&
+                        rect.left >= 0 &&
+                        rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+                        rect.right <= (window.innerWidth || document.documentElement.clientWidth)
                     );
                 }
 
@@ -99,7 +130,7 @@ async function highlight_links( page ) {
                 let parent = el;
                 while (parent) {
                     if (!isStyleVisible(parent)) {
-                    return false;
+                        return false;
                     }
                     parent = parent.parentElement;
                 }
@@ -112,18 +143,18 @@ async function highlight_links( page ) {
 
             const position = e.getBoundingClientRect();
 
-            if( position.width > 5 && position.height > 5 && isElementVisible(e) ) {
+            if (position.width > 5 && position.height > 5 && isElementVisible(e)) {
                 const link_text = e.textContent.replace(/[^a-zA-Z0-9 ]/g, '');
-                e.setAttribute( "gpt-link-text", link_text );
+                e.setAttribute("gpt-link-text", link_text);
             }
         }, e);
-    } );
+    });
 }
 
 async function waitForEvent(page, event) {
     return page.evaluate(event => {
         return new Promise((r, _) => {
-            document.addEventListener(event, function(e) {
+            document.addEventListener(event, function (e) {
                 r();
             });
         });
@@ -131,23 +162,23 @@ async function waitForEvent(page, event) {
 }
 
 (async () => {
-    console.log( "###########################################" );
-    console.log( "# GPT4V-Browsing by Unconventional Coding #" );
-    console.log( "###########################################\n" );
+    console.log("###########################################");
+    console.log("# GeminiPro-Browsing by Unconventional Coding #");
+    console.log("###########################################\n");
 
-    const browser = await puppeteer.launch( {
-        headless: "false",
-        executablePath: '/Applications/Google\ Chrome\ Canary.app/Contents/MacOS/Google\ Chrome\ Canary',
-        userDataDir: '/Users/jasonzhou/Library/Application\ Support/Google/Chrome\ Canary/Default',
-    } );
+    const browser = await puppeteer.launch({
+        headless: false,
+        // executablePath: '/Applications/Google\ Chrome\ Canary.app/Contents/MacOS/Google\ Chrome\ Canary',
+        // userDataDir: '/Users/jasonzhou/Library/Application\ Support/Google/Chrome\ Canary/Default',
+    });
 
     const page = await browser.newPage();
 
-    await page.setViewport( {
+    await page.setViewport({
         width: 1200,
         height: 1200,
         deviceScaleFactor: 1,
-    } );
+    });
 
     const messages = [
         {
@@ -178,31 +209,31 @@ async function waitForEvent(page, event) {
     let url;
     let screenshot_taken = false;
 
-    while( true ) {
-        if( url ) {
+    while (true) {
+        if (url) {
             console.log("Crawling " + url);
-            await page.goto( url, {
+            await page.goto(url, {
                 waitUntil: "domcontentloaded",
                 timeout: timeout,
-            } );
+            });
 
-            await Promise.race( [
+            await Promise.race([
                 waitForEvent(page, 'load'),
                 sleep(timeout)
-            ] );
+            ]);
 
-            await highlight_links( page );
+            await highlight_links(page);
 
-            await page.screenshot( {
+            await page.screenshot({
                 path: "screenshot.jpg",
                 fullPage: true,
-            } );
+            });
 
             screenshot_taken = true;
             url = null;
         }
 
-        if( screenshot_taken ) {
+        if (screenshot_taken) {
             const base64_image = await image_to_base64("screenshot.jpg");
 
             messages.push({
@@ -222,86 +253,79 @@ async function waitForEvent(page, event) {
             screenshot_taken = false;
         }
 
-        const response = await openai.chat.completions.create({
-            model: "gpt-4-vision-preview",
-            max_tokens: 1024,
-            messages: messages,
-        });
-
-        const message = response.choices[0].message;
-        const message_text = message.content;
+        const message_text = await generate_genai_response(messages);
 
         messages.push({
             "role": "assistant",
             "content": message_text,
         });
 
-        console.log( "GPT: " + message_text );
+        console.log("GPT: " + message_text);
 
         if (message_text.indexOf('{"click": "') !== -1) {
             let parts = message_text.split('{"click": "');
             parts = parts[1].split('"}');
             const link_text = parts[0].replace(/[^a-zA-Z0-9 ]/g, '');
-        
+
             console.log("Clicking on " + link_text)
-        
+
             try {
                 const elements = await page.$$('[gpt-link-text]');
-        
+
                 let partial;
                 let exact;
-        
+
                 for (const element of elements) {
                     const attributeValue = await element.evaluate(el => el.getAttribute('gpt-link-text'));
-        
+
                     if (attributeValue.includes(link_text)) {
                         partial = element;
                     }
-        
+
                     if (attributeValue === link_text) {
                         exact = element;
                     }
                 }
-        
+
                 if (exact || partial) {
                     const [response] = await Promise.all([
                         page.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(e => console.log("Navigation timeout/error:", e.message)),
                         (exact || partial).click()
                     ]);
-        
+
                     // Additional checks can be done here, like validating the response or URL
-                    await Promise.race( [
+                    await Promise.race([
                         waitForEvent(page, 'load'),
                         sleep(timeout)
-                    ] );
+                    ]);
 
                     await highlight_links(page);
-        
+
                     await page.screenshot({
                         path: "screenshot.jpg",
                         quality: 100,
                         fullpage: true
                     });
-        
+
                     screenshot_taken = true;
                 } else {
                     throw new Error("Can't find link");
                 }
             } catch (error) {
                 console.log("ERROR: Clicking failed", error);
-        
+
                 messages.push({
                     "role": "user",
                     "content": "ERROR: I was unable to click that element",
                 });
             }
-        
+
             continue;
         } else if (message_text.indexOf('{"url": "') !== -1) {
             let parts = message_text.split('{"url": "');
             parts = parts[1].split('"}');
             url = parts[0];
-        
+
             continue;
         }
 
