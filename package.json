@@ -12,7 +12,6 @@
     "@google/generative-ai": "^0.1.2",
     "dotenv": "^16.3.1",
     "generative-ai": "link:@types/google/generative-ai",
-    "openai": "^4.20.1",
     "puppeteer": "^21.6.1",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
